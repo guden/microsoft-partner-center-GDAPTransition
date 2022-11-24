@@ -91,7 +91,7 @@ namespace PartnerLed.Providers
                 };
             }
 
-           
+
         }
 
         private string GetUserResponse(HttpStatusCode statusCode)
@@ -127,7 +127,7 @@ namespace PartnerLed.Providers
             }
             else { url = nextLink; }
             var accessToken = await getToken(Resource.TrafficManager);
-                var response = await protectedApiCallHelper.CallWebApiAndProcessResultAsync(url, accessToken);
+            var response = await protectedApiCallHelper.CallWebApiAndProcessResultAsync(url, accessToken);
             if (!response.IsSuccessStatusCode)
             {
                 if (response.StatusCode == HttpStatusCode.Unauthorized)
@@ -145,7 +145,7 @@ namespace PartnerLed.Providers
         /// <param name="accessToken">bearer token.</param>
         /// <param name="nextLink">For fetching paginated query.</param>
         /// <returns>GDAP relationship object</returns>
-        private async Task<DelegatedAdminRelationship?> GetGdapRelationship(string? granularRelationshipId = null)
+        private async Task<DelegatedAdminRelationship?> GetGdapRelationship(string granularRelationshipId)
         {
             try
             {
@@ -154,8 +154,9 @@ namespace PartnerLed.Providers
                 {
                     url = $"{url}/{granularRelationshipId}";
                 }
-                else {
-                    throw new Exception("GDAP relationship id missing."); 
+                else
+                {
+                    throw new Exception("GDAP relationship id missing.");
                 }
 
                 var accessToken = await getToken(Resource.TrafficManager);
@@ -209,14 +210,21 @@ namespace PartnerLed.Providers
                     Console.WriteLine($"Check the path {path}");
                 }
 
-                IEnumerable<string>? gdapId = inputRequest?.Select(p => p.Id.ToString());
+                IEnumerable<string>? gdapIdList = inputRequest?.Select(p => p.Id.ToString());
                 var responseList = new List<DelegatedAdminRelationship>();
+                Console.WriteLine("Refreshing relationship(s) status...");
+                var options = new ParallelOptions()
+                {
+                    MaxDegreeOfParallelism = 10
+                };
                 protectedApiCallHelper.setHeader(false);
-                var tasks = gdapId?
-                    .Select(id => GetGdapRelationship(id));
-                DelegatedAdminRelationship?[] collection = await Task.WhenAll(tasks);
-                responseList.AddRange(collection);
-
+                if (gdapIdList.Any())
+                {
+                    await Parallel.ForEachAsync(gdapIdList, options, async (gdapId, cancellationToken) =>
+                    {
+                        responseList.Add(await GetGdapRelationship(gdapId));
+                    });
+                }
 
                 if (remainingDataList != null)
                 {

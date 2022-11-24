@@ -140,9 +140,18 @@ namespace PartnerLed.Providers
                 var responseList = new List<DelegatedAdminAccessAssignmentRequest>();
                 Console.WriteLine("Updating Access Assignment..");
                 protectedApiCallHelper.setHeader(false);
-                var tasks = inputRequest?.Select(x => GetDelegatedAdminAccessAssignment(x.GdapRelationshipId, x.AccessAssignmentId));
-                var collection = await Task.WhenAll(tasks);
-                responseList.AddRange(collection);
+
+                var options = new ParallelOptions()
+                {
+                    MaxDegreeOfParallelism = 10
+                };
+                if (inputRequest.Any())
+                {
+                    await Parallel.ForEachAsync(inputRequest, options, async (x, cancellationToken) =>
+                    {
+                        responseList.Add(await GetDelegatedAdminAccessAssignment(x.GdapRelationshipId, x.AccessAssignmentId));
+                    });
+                }
 
                 if (remainingDataList != null)
                 {

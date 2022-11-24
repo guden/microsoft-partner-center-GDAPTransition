@@ -11,7 +11,6 @@ namespace PartnerLed.Providers
     /// </summary>
     public class ProtectedApiCallHelper
     {
-        private const string GRAPH_RESOURCE = "graph";
         /// <summary>
         /// Constructor
         /// </summary>
@@ -20,28 +19,34 @@ namespace PartnerLed.Providers
         {
             HttpClient = httpClient;
         }
-
+        private static object objLock = new Object();
         protected HttpClient HttpClient { get; private set; }
 
         public void setHeader(bool isGraph)
         {
-
-            var defaultRequestHeaders = HttpClient.DefaultRequestHeaders;
-            // clearing headers
-            defaultRequestHeaders.Clear();
-            if (defaultRequestHeaders.Accept == null || !defaultRequestHeaders.Accept.Any(m => m.MediaType == "application/json"))
+            lock (objLock)
             {
-                HttpClient.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("*/*"));
-            }
-            if (!isGraph)
-            {
-                HttpClient.DefaultRequestHeaders.Add("Accept-Encoding", new List<string> { "gzip", "deflate", "br" });
+                var defaultRequestHeaders = HttpClient.DefaultRequestHeaders;
+                // clearing headers
+                defaultRequestHeaders.Clear();
+                if (defaultRequestHeaders.Accept == null || !defaultRequestHeaders.Accept.Any(m => m.MediaType == "application/json"))
+                {
+                    HttpClient.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("*/*"));
+                }
+                if (!isGraph)
+                {
+                    HttpClient.DefaultRequestHeaders.Add("Accept-Encoding", new List<string> { "gzip", "deflate", "br" });
+                }
             }
         }
 
-        private void setToken(string token) {
-            var defaultRequestHeaders = HttpClient.DefaultRequestHeaders;
-            defaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        private void setToken(string token)
+        {
+            lock (objLock)
+            {
+                var defaultRequestHeaders = HttpClient.DefaultRequestHeaders;
+                defaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
+            }
         }
 
         /// <summary>
@@ -64,9 +69,9 @@ namespace PartnerLed.Providers
         /// <param name="data">JSON data</param>
         public async Task<HttpResponseMessage> CallWebApiPostAndProcessResultAsync(string webApiUrl, string accessToken, string data)
         {
-           setToken(accessToken);
-           var httpContent = new StringContent(data, System.Text.Encoding.UTF8, "application/json");
-           return await HttpClient.PostAsync(webApiUrl, httpContent);
+            setToken(accessToken);
+            var httpContent = new StringContent(data, System.Text.Encoding.UTF8, "application/json");
+            return await HttpClient.PostAsync(webApiUrl, httpContent);
         }
 
         /// <summary>
@@ -75,7 +80,8 @@ namespace PartnerLed.Providers
         /// <param name="webApiUrl">URL of the web API to call (supposed to return JSON)</param>
         /// <param name="accessToken">Access token used as a bearer security token to call the web API</param>
         /// <returns></returns>
-        public async Task<Stream> CallWebApiProcessSteamAsync(string webApiUrl, string accessToken) {
+        public async Task<Stream> CallWebApiProcessSteamAsync(string webApiUrl, string accessToken)
+        {
             setHeader(false);
             setToken(accessToken);
             return await HttpClient.GetStreamAsync(webApiUrl);
