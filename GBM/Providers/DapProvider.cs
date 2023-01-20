@@ -1,8 +1,11 @@
-﻿using Microsoft.Extensions.Logging;
+﻿using GBM.Model;
+using GBM.Utility;
+using Microsoft.Extensions.Logging;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using PartnerLed.Model;
 using PartnerLed.Utility;
+using System.Globalization;
 using System.Net;
 
 namespace PartnerLed.Providers
@@ -17,6 +20,7 @@ namespace PartnerLed.Providers
         private readonly IGdapProvider gdapProvider;
         private readonly IExportImportProviderFactory exportImportProviderFactory;
         private readonly IAccessAssignmentProvider accessAssignmentProvider;
+        private readonly CustomProperties customProperties;
 
         protected ProtectedApiCallHelper protectedApiCallHelper;
 
@@ -45,6 +49,7 @@ namespace PartnerLed.Providers
             this.accessAssignmentProvider = accessAssignmentProvider;
             protectedApiCallHelper = new ProtectedApiCallHelper(appSetting.Client);
             GdapBaseEndpoint = appSetting.GdapBaseEndPoint;
+            customProperties = appSetting.customProperties;
         }
 
         private async Task<string?> getToken(Resource resource)
@@ -57,18 +62,18 @@ namespace PartnerLed.Providers
         /// <summary>
         /// Export customer Details based on user selection of type
         /// </summary>
-        /// <param name="type">Export type "Json" or "Csv" based on user selection.</param>
+        /// <param name="type">Export type "JSON" or "CSV" based on user selection.</param>
         /// <returns></returns>
         public async Task<bool> ExportCustomerDetails(ExportImport type)
         {
-            var exportImportProvider = exportImportProviderFactory.Create(type);
-            Console.WriteLine("Getting customers...");
+            var exportImportProvider = exportImportProviderFactory.Create(type);            
             var url = $"{WebApiUrlAllDaps}?$count=true&$filter=dapEnabled+eq+true&$orderby=organizationDisplayName";
             var nextLink = string.Empty;
             List<DelegatedAdminRelationshipRequest>? allCustomer = new List<DelegatedAdminRelationshipRequest>();
             try
             {
                 Console.WriteLine("Downloading customers..");
+                Helper.ResetSpin("Pages.. ");
                 protectedApiCallHelper.setHeader(false);
                 do
                 {
@@ -77,7 +82,9 @@ namespace PartnerLed.Providers
                     {
                         url = nextLink;
                     }
+                    
                     var response = await protectedApiCallHelper.CallWebApiAndProcessResultAsync(url, accessToken);
+                    Helper.Spin();
                     if (response.IsSuccessStatusCode)
                     {
                         var result = JsonConvert.DeserializeObject(response.Content.ReadAsStringAsync().Result) as JObject;
@@ -88,7 +95,7 @@ namespace PartnerLed.Providers
                         {
                             nextLink = (string?)nextData.FirstOrDefault();
                         }
-                        Console.Write("..");
+                        Helper.Spin();
                         allCustomer.AddRange(GetListDelegatedRequest(result, partnerTenantId));
 
                     }
@@ -120,7 +127,10 @@ namespace PartnerLed.Providers
                 foreach (var item in child.Value)
                 {
                     var dapCustomer = item.ToObject<DelegatedAdminCustomer>();
-                    allCustomer.Add(new DelegatedAdminRelationshipRequest() { CustomerTenantId = dapCustomer.CustomerTenantId, OrganizationDisplayName = dapCustomer.OrganizationDisplayName, PartnerTenantId = partnerTenantId });
+                    // check for default value
+                    var displayName = !string.IsNullOrEmpty(customProperties.DefaultGDAPName) ? string.Format(CultureInfo.InvariantCulture, customProperties.DefaultGDAPName, dapCustomer.CustomerTenantId) : string.Empty;
+                    var duration = !string.IsNullOrEmpty(customProperties.DefaultGDAPDuration) ? $"{customProperties.DefaultGDAPDuration}" : string.Empty;
+                    allCustomer.Add(new DelegatedAdminRelationshipRequest() {Name = displayName, Duration = duration,  CustomerTenantId = dapCustomer.CustomerTenantId, OrganizationDisplayName = dapCustomer.OrganizationDisplayName, PartnerTenantId = partnerTenantId });
                 }
             }
 
@@ -133,7 +143,7 @@ namespace PartnerLed.Providers
             switch (statusCode)
             {
                 case HttpStatusCode.Unauthorized: return "Authentication Failed. Please make sure your Sign-in credentials are correct and MFA enabled.";
-                case HttpStatusCode.NotFound: return "Cutomers not found.";
+                case HttpStatusCode.NotFound: return "Customers not found.";
                 default: return "Failed to get Customer details.";
             }
         }
@@ -141,12 +151,12 @@ namespace PartnerLed.Providers
         /// <summary>
         /// Generate GDAP relationship with Access Assignment in one flow.
         /// </summary>
-        /// <param name="type">Export type "Json" or "Csv" based on user selection.</param>
+        /// <param name="type">Export type "JSON" or "CSV" based on user selection.</param>
         /// <returns></returns>
         public async Task<bool> GenerateDAPRelatioshipwithAccessAssignment(ExportImport type)
         {
             var option = Helper.UserConfirmation("Warning: To run this operation, please make sure all the input files are in the folder: \n" + $"{Constants.InputFolderPath}");
-            
+
             try
             {
                 if (option)
@@ -159,7 +169,7 @@ namespace PartnerLed.Providers
                     Thread.Sleep(ts1);
                     await gdapProvider.RefreshGDAPRequestAsync(type);
 
-                    while (!Helper.UserConfirmation("Confirm all GDAP relationship activation complete[y/Y] or refresh again[r/R]:"))
+                    while (!Helper.UserConfirmation("Confirm all GDAP relationship activation complete[y/Y] or refresh again[r/R]:", false))
                     {
                         await gdapProvider.RefreshGDAPRequestAsync(type);
                     }

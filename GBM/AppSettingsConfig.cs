@@ -1,6 +1,7 @@
 ﻿// Copyright (c) Microsoft Corporation. All rights reserved.
 // Licensed under the MIT License.
 
+using GBM.Model;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Identity.Client;
 using System.Reflection;
@@ -26,6 +27,10 @@ namespace PartnerLed
 
         public string GdapEndPoint { get; set; }
 
+        public string PartnerCenterAPI { get; set; }
+
+        public CustomProperties customProperties { get; set; }
+
         /// <summary>
         /// Reads the configuration from a json file
         /// </summary>
@@ -50,6 +55,20 @@ namespace PartnerLed
             Configuration.Bind("Authentication", config.PublicClientApplicationOptions);
             config.MicrosoftGraphBaseEndpoint = Configuration.GetValue<string>("WebAPI:MicrosoftGraphBaseEndpoint");
             config.GdapEndPoint = Configuration.GetValue<string>("WebAPI:GdapEndPoint");
+            config.PartnerCenterAPI = Configuration.GetValue<string>("WebAPI:PartnerCenterAPI");
+
+            // custom properties setting
+            var replaceFileDuringUpdate = Configuration.GetValue<bool>("CustomProperties:ReplaceFileDuringUpdate");
+            var defaultName = Configuration.GetValue<string>("CustomProperties:DefaultGDAPName");
+            var defaultDuration = Configuration.GetValue<string>("CustomProperties:DefaultGDAPDuration");
+            config.customProperties = new CustomProperties()
+            {
+                ReplaceFileDuringUpdate = replaceFileDuringUpdate,
+                DefaultGDAPDuration = string.IsNullOrEmpty(defaultDuration) ? string.Empty : defaultDuration,
+                DefaultGDAPName = string.IsNullOrEmpty(defaultName) ? string.Empty : defaultName,
+                Version = Configuration.GetValue<string>("CustomProperties:Version")
+            };
+
             return config;
         }
     }

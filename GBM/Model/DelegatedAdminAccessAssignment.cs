@@ -1,6 +1,8 @@
-﻿namespace PartnerLed.Model
+﻿using GBM.Model;
+
+namespace PartnerLed.Model
 {
-    public class DelegatedAdminAccessAssignment
+    public class DelegatedAdminAccessAssignment : ODataEntity
     {
         /// <summary>
         /// Gets or sets the ID of the access assignment.
@@ -36,5 +38,8 @@
         /// Gets or sets the version stamp value used for optimistic concurrency control. This is set by the system and cannot be set by the caller.
         /// </summary>
         public string VersionStamp { get; set; }
+
+        
+        public IDictionary<string, object> Properties { get; set; }
     }
 }

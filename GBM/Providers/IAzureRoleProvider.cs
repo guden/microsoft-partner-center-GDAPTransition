@@ -1,4 +1,5 @@
-﻿using PartnerLed.Model;
+﻿using GBM.Model;
+using PartnerLed.Model;
 
 namespace PartnerLed.Providers
 {

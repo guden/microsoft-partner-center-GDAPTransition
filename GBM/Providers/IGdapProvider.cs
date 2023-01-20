@@ -9,5 +9,9 @@ namespace PartnerLed.Providers
         Task<bool> CreateGDAPRequestAsync(ExportImport type);
 
         Task<bool> RefreshGDAPRequestAsync(ExportImport type);
+
+        Task<bool> TerminateGDAPRequestAsync(ExportImport type);
+
+        Task<bool> CreateTerminateRelationshipFile(ExportImport type);
     }
 }

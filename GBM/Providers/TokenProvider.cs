@@ -20,7 +20,7 @@ namespace PartnerLed.Providers
         }
 
         protected PublicAppUsingInteractive tokenAcquisitionHelper;
-        private AuthenticationResult authenticationResult, graphAuthenticationResult;
+        private AuthenticationResult authenticationResult, graphAuthenticationResult, authenticationResultPartnerCenter;
         private ProtectedApiCallHelper protectedApiCallHelper;
         private string graphendpoint;
 
@@ -30,7 +30,15 @@ namespace PartnerLed.Providers
         /// Scopes to request access to the protected Web API
         /// </summary>
         private static string[] Scopes { get; } = new string[] {
-            "https://api.partnercustomeradministration.microsoft.com/PartnerCustomerDelegatedAdministration.ReadWrite.All" };
+            "https://api.partnercustomeradministration.microsoft.com/PartnerCustomerDelegatedAdministration.ReadWrite.All" ,
+        };
+        
+        /// <summary>
+        /// Scopes to request access to the protected Web API (Here Partner Center)
+        /// </summary>
+        private static string[] PartnerCenterScopes { get; } = new string[] {
+            "https://api.partnercenter.microsoft.com/user_impersonation" ,
+        };
 
         /// <summary>
         /// Scopes to request access to the protected Web API (here Microsoft Graph)
@@ -79,6 +87,14 @@ namespace PartnerLed.Providers
 
                         result = await AcquireTokenAsync(ScopesGraph);
                         graphAuthenticationResult = result;
+                        break;
+                    case Resource.PartnerCenter:
+                        if (validateToken(authenticationResultPartnerCenter))
+                        {
+                            return authenticationResultPartnerCenter;
+                        }
+                        result = await AcquireTokenAsync(PartnerCenterScopes);
+                        authenticationResultPartnerCenter = result;
                         break;
                 }
             }

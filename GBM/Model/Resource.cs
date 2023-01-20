@@ -3,6 +3,7 @@
     public enum Resource
     {
         TrafficManager,
-        GraphManager
+        GraphManager,
+        PartnerCenter
     }
 }

@@ -3,6 +3,6 @@ namespace PartnerLed.Model
 {
     public enum ExportImport
     {
-        Csv, Json
+        Csv = 1, Json
     }
 }

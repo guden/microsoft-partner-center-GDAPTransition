@@ -1,4 +1,5 @@
-﻿using Newtonsoft.Json;
+﻿using GBM.Model;
+using Newtonsoft.Json;
 using Newtonsoft.Json.Converters;
 
 namespace PartnerLed.Model
@@ -74,18 +75,13 @@ namespace PartnerLed.Model
         /// <summary>
         /// Gets or sets the list of Delegated Admin relationship requests.
         /// </summary>
-
+        [JsonIgnore]
         public IEnumerable<DelegatedAdminRelationshipRequest> Requests { get; set; }
 
         /// <summary>
         /// Gets or sets the list of Delegated Admin access assignments.
         /// </summary>
         public IEnumerable<DelegatedAdminAccessAssignment> AccessAssignments { get; set; }
-
-        /// <summary>
-        /// Gets or sets the version stamp value used for optimistic concurrency control. This is set by the system and cannot be set by the caller.
-        /// </summary>
-        public string VersionStamp { get; set; }
     }
 }
 

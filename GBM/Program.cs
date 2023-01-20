@@ -1,5 +1,7 @@
 ﻿using System.Diagnostics;
+using System.Numerics;
 using System.Reflection;
+using GBM.Model;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -30,10 +32,10 @@ using IHost host = Host.CreateDefaultBuilder(args)
     }).Build();
 
 
-await RunAsync(host.Services);
+await RunAsync(host.Services, AppSetting.customProperties.Version);
 await host.RunAsync();
 
-static async Task RunAsync(IServiceProvider serviceProvider)
+static async Task RunAsync(IServiceProvider serviceProvider, string version)
 {
     Console.Clear();
     Console.WriteLine("Checking pre-requisites...");
@@ -48,16 +50,14 @@ static async Task RunAsync(IServiceProvider serviceProvider)
     }
 
     setupDirectory();
-    var type = setupFormat();
-
-    Console.WriteLine("Please choose an option..");
-
+    var type = setupFormat(version);
+    SetupFile(type, serviceProvider);
     DisplayOptions();
 
 SelectOption:
     Console.Write('>');
     var option = Console.ReadLine();
-    if (!short.TryParse(option, out short input) || !(input >= 1 && input <= 10))
+    if (!short.TryParse(option, out short input) || !(input >= 1 && input <= 13))
     {
         Console.WriteLine("Invalid input, Please try again.");
         DisplayOptions();
@@ -77,8 +77,11 @@ SelectOption:
         6 => await serviceProvider.GetRequiredService<IDapProvider>().GenerateDAPRelatioshipwithAccessAssignment(type),
         7 => await serviceProvider.GetRequiredService<IGdapProvider>().CreateGDAPRequestAsync(type),
         8 => await serviceProvider.GetRequiredService<IGdapProvider>().RefreshGDAPRequestAsync(type),
+        13 => await serviceProvider.GetRequiredService<IGdapProvider>().TerminateGDAPRequestAsync(type),
         9 => await serviceProvider.GetRequiredService<IAccessAssignmentProvider>().CreateAccessAssignmentRequestAsync(type),
         10 => await serviceProvider.GetRequiredService<IAccessAssignmentProvider>().RefreshAccessAssignmentRequest(type),
+        11 => await serviceProvider.GetRequiredService<IAccessAssignmentProvider>().UpdateAccessAssignmentRequestAsync(type),
+        12 => await serviceProvider.GetRequiredService<IAccessAssignmentProvider>().DeleteAccessAssignmentRequestAsync(type),
         _ => throw new InvalidOperationException("Invalid input")
     };
 
@@ -99,9 +102,21 @@ static void DisplayOptions()
     Console.WriteLine("\t 6. One flow generation");
     Console.WriteLine("\t 7. Create GDAP Relationship(s)");
     Console.WriteLine("\t 8. Refresh GDAP Relationship status\n");
+    
     Console.WriteLine("Provision Partner Security Group access operations: ");
     Console.WriteLine("\t 9. Create Security Group-Role Assignment(s)");
-    Console.WriteLine("\t 10. Refresh Security Group-Role Assignment status");
+    Console.WriteLine("\t 10. Refresh Security Group-Role Assignment status\n");
+
+    Console.WriteLine("Update and delete operations: ");
+    Console.WriteLine("\t 11. Update Security Group-Role Assignment(s)");
+    Console.WriteLine("\t 12. Delete Security Group-Role Assignment(s)");
+    Console.WriteLine("\t 13. Terminate GDAP Relationship(s)\n");
+}
+
+static async void SetupFile(ExportImport type, IServiceProvider serviceProvider)
+{
+    await serviceProvider.GetRequiredService<IGdapProvider>().CreateTerminateRelationshipFile(type);
+    await serviceProvider.GetRequiredService<IAccessAssignmentProvider>().CreateDeleteAccessAssignmentFile(type);
 }
 
 static bool checkPrerequisites(IServiceProvider serviceProvider)
@@ -118,7 +133,7 @@ static void setupDirectory()
     Directory.CreateDirectory(Constants.LogFolderPath);
 }
 
-static ExportImport setupFormat()
+static ExportImport setupFormat(string version)
 {
     Console.WriteLine("\n\nPlease choose an file type you like to work with for this tool");
     Console.WriteLine("1. CSV");
@@ -133,6 +148,7 @@ SelectOption:
         goto SelectOption;
     }
     Console.Clear();
-    Console.WriteLine("GDAP Bulk Migration Tool.");
-    return input == 1 ? ExportImport.Csv : ExportImport.Json;
+    Console.WriteLine($"GDAP Bulk Migration Tool {version}.");
+    
+    return (ExportImport)Convert.ToInt32(input);
 }

@@ -1,4 +1,5 @@
-﻿using Newtonsoft.Json;
+﻿using GBM.Model;
+using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using PartnerLed.Model;
 using PartnerLed.Utility;
@@ -24,10 +25,30 @@ namespace PartnerLed.Providers
 
         }
 
+        private CSPPartnerType DisplayPartnerOptions()
+        {
+            Console.WriteLine("\nSelect Partner type");
+            Console.WriteLine("\t 1. Direct Bill Partner");
+            Console.WriteLine("\t 2. Indirect Provider");
+            Console.WriteLine("\t 3. Indirect Reseller\n");
+            Console.WriteLine("press any other key to proceed with default Roles.\n");
+
+            var option = Console.ReadLine();
+            if (!short.TryParse(option, out short input) || !(input >= 1 && input <= 3))
+            {
+
+                return CSPPartnerType.None;
+            }
+
+            return (CSPPartnerType)Convert.ToInt32(input);
+        }
+
         public async Task<bool> ExportAzureDirectoryRoles(ExportImport type)
         {
-            var jsonReader = exportImportProviderFactory.Create(ExportImport.Json);
-            string? path = $"{Path.GetDirectoryName(Assembly.GetEntryAssembly().Location)}/Configuration/ADRoles.json";
+            //Partner persona setup
+            var persona = this.DisplayPartnerOptions();
+            var fileName = Enum.IsDefined(persona) && persona != CSPPartnerType.None ? $"ADRoles-{persona}" : "ADRoles";
+            string? path = $"{Path.GetDirectoryName(Assembly.GetEntryAssembly().Location)}/Configuration/{fileName}.json";
             try
             {
                 using (StreamReader r = new StreamReader(path))

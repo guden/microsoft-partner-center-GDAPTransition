@@ -1,5 +1,6 @@
 ﻿
 
+using GBM.Model;
 using Microsoft.Identity.Client;
 
 namespace PartnerLed
@@ -13,6 +14,10 @@ namespace PartnerLed
         public string GdapBaseEndPoint { get; private set; }
 
         public string MicrosoftGraphBaseEndpoint { get; private set; }
+
+        public string PartnerCenterAPI { get; private set; }
+
+        public CustomProperties customProperties { get; private set; }
 
         public HttpClient Client { get { return new HttpClient(); } }
 
@@ -34,6 +39,8 @@ namespace PartnerLed
             var appConfig = config.PublicClientApplicationOptions;
             GdapBaseEndPoint = config.GdapEndPoint;
             MicrosoftGraphBaseEndpoint = config.MicrosoftGraphBaseEndpoint;
+            PartnerCenterAPI= config.PartnerCenterAPI;
+            customProperties = config.customProperties;
             InteractiveApp = PublicClientApplicationBuilder
                         .CreateWithApplicationOptions(appConfig)
                         .WithDefaultRedirectUri().WithExtraQueryParameters(new Dictionary<string, string>(){ { "acr_values", "urn:microsoft:policies:mfa" } }).Build();

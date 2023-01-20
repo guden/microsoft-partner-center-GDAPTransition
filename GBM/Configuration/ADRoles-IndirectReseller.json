@@ -1,5 +1,4 @@
-﻿//This is just a sample set of Roles, please refer to the ADRoleTemplatesAll.json to populate the roles that you want to provision for.
-[
+﻿[
   {
     "name": "Collaboration",
     "roles": []

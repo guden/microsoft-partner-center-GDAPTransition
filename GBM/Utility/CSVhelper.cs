@@ -27,6 +27,15 @@ namespace PartnerLed.Utility
 
             using var subscriptionsWriter = new StreamWriter(fileName);
             using var subscriptionsCsvWriter = new CsvWriter(subscriptionsWriter, CultureInfo.InvariantCulture);
+            Type type = typeof(T);
+            if (type.Name == "DelegatedAdminRelationship")
+            {
+                subscriptionsCsvWriter.Context.RegisterClassMap<DelegatedAdminRelationshipMap>();
+            }
+            else if (type.Name == "DelegatedAdminAccessAssignmentRequest")
+            {
+                subscriptionsCsvWriter.Context.RegisterClassMap<DelegatedAdminAccessAssignmentRequestMap>();
+            }
             await subscriptionsCsvWriter.WriteRecordsAsync(data);
         }
 
@@ -42,7 +51,8 @@ namespace PartnerLed.Utility
             {
                 Encoding = Encoding.UTF8, // Our file uses UTF-8 encoding.
                 Delimiter = ",", // The delimiter is a comma.
-                ShouldSkipRecord = record => record.Record.All(field => string.IsNullOrWhiteSpace(field))      
+                HasHeaderRecord = true,
+                ShouldSkipRecord = args => args.Row.Parser.Record.All(field => string.IsNullOrWhiteSpace(field))
             };
 
             using TextReader fileReader = File.OpenText($"{fileName}");
@@ -51,6 +61,10 @@ namespace PartnerLed.Utility
             if (type.Name == "DelegatedAdminRelationship")
             {
                 csvReader.Context.RegisterClassMap<DelegatedAdminRelationshipMap>();
+            }
+            else if (type.Name == "DelegatedAdminAccessAssignmentRequest")
+            {
+                csvReader.Context.RegisterClassMap<DelegatedAdminAccessAssignmentRequestMap>();
             }
             List<T> input = csvReader.GetRecords<T>().ToList();
             csvReader.Dispose();

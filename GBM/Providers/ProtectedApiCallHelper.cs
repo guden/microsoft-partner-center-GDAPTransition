@@ -1,6 +1,7 @@
 ﻿// Copyright (c) Microsoft Corporation. All rights reserved.
 // Licensed under the MIT License.
 
+using Microsoft.Net.Http.Headers;
 using System.Net.Http.Headers;
 
 
@@ -19,8 +20,10 @@ namespace PartnerLed.Providers
         {
             HttpClient = httpClient;
         }
-        private static object objLock = new Object();
+
         protected HttpClient HttpClient { get; private set; }
+
+        private static object objLock = new Object();
 
         public void setHeader(bool isGraph)
         {
@@ -49,16 +52,39 @@ namespace PartnerLed.Providers
             }
         }
 
+        private void setEtag(string eTag)
+        {
+            var defaultRequestHeaders = HttpClient.DefaultRequestHeaders;
+            defaultRequestHeaders.Remove(HeaderNames.IfMatch);
+            defaultRequestHeaders.Add(HeaderNames.IfMatch, eTag);
+        }
+
         /// <summary>
         /// Get call the protected web API and processes the result
         /// </summary>
         /// <param name="webApiUrl">URL of the web API to call (supposed to return JSON)</param>
         /// <param name="accessToken">Access token used as a bearer security token to call the web API</param>
-        public async Task<HttpResponseMessage> CallWebApiAndProcessResultAsync(string webApiUrl, string accessToken)
+        public async Task<HttpResponseMessage> CallWebApiAndProcessResultAsync(string webApiUrl, string? accessToken)
         {
-            setToken(accessToken);
+            if (!string.IsNullOrEmpty(accessToken))
+            {
+                setToken(accessToken);
+            }
             HttpResponseMessage response = await HttpClient.GetAsync(webApiUrl);
             return response;
+        }
+
+        /// <summary>
+        /// Delete call the protected web API and processes the result
+        /// </summary>
+        /// <param name="webApiUrl">URL of the web API to call (supposed to return JSON)</param>
+        /// <param name="accessToken">Access token used as a bearer security token to call the web API</param>
+        /// <param name="eTag">For OData validation</param>
+        public async Task<HttpResponseMessage> CallWebApiAndDeleteProcessResultAsync(string webApiUrl, string accessToken, string eTag)
+        {
+            setToken(accessToken);
+            setEtag(eTag);
+            return await HttpClient.DeleteAsync(webApiUrl);
         }
 
         /// <summary>
@@ -67,11 +93,34 @@ namespace PartnerLed.Providers
         /// <param name="webApiUrl">URL of the web API to call (supposed to return JSON)</param>
         /// <param name="accessToken">Access token used as a bearer security token to call the web API</param>
         /// <param name="data">JSON data</param>
-        public async Task<HttpResponseMessage> CallWebApiPostAndProcessResultAsync(string webApiUrl, string accessToken, string data)
+        /// <param name="eTag">Odata validation</param>
+        public async Task<HttpResponseMessage> CallWebApiPostAndProcessResultAsync(string webApiUrl, string accessToken, string data, string? eTag = null)
         {
             setToken(accessToken);
+            if (!string.IsNullOrEmpty(eTag))
+            {
+                setEtag(eTag);
+            }
             var httpContent = new StringContent(data, System.Text.Encoding.UTF8, "application/json");
             return await HttpClient.PostAsync(webApiUrl, httpContent);
+        }
+
+        /// <summary>
+        /// Patch call the protected web API and processes the result
+        /// </summary>
+        /// <param name="webApiUrl">URL of the web API to call (supposed to return JSON)</param>
+        /// <param name="accessToken">Access token used as a bearer security token to call the web API</param>
+        /// <param name="eTag">Odata validation</param>
+        /// <param name="data">JSON data</param>
+        public async Task<HttpResponseMessage> CallWebApiPatchAndProcessResultAsync(string webApiUrl, string accessToken, string eTag, string data)
+        {
+            setToken(accessToken);
+            if (!string.IsNullOrEmpty(eTag))
+            {
+                setEtag(eTag);
+            }
+            var httpContent = new StringContent(data, System.Text.Encoding.UTF8, "application/json");
+            return await HttpClient.PatchAsync(webApiUrl, httpContent);
         }
 
         /// <summary>

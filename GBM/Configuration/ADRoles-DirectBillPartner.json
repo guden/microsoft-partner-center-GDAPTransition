@@ -1,5 +1,4 @@
-﻿//This is just a sample set of Roles, please refer to the ADRoleTemplatesAll.json to populate the roles that you want to provision for.
-[
+﻿[
   {
     "name": "Collaboration",
     "roles": []
@@ -26,9 +25,19 @@
         "description": "Ability to assign, remove and update license assignments."
       },
       {
+        "name": "Privileged authentication administrator",
+        "id": "7be44c8a-adaf-4e2a-84d6-ab2649e08a13",
+        "description": "Allowed to view, set and reset authentication method information for any user (admin or non-admin)."
+      },
+      {
         "name": "User administrator",
         "id": "fe930be7-5e62-47db-91af-98c3a49a38b1",
         "description": "Can manage all aspects of users and groups, including resetting passwords for limited admins."
+      },
+      {
+        "name": "Cloud application administrator",
+        "id": "158c047a-c907-4556-b7ef-446551a6b5f7",
+        "description": "Can create and manage all aspects of app registrations and enterprise apps except App Proxy."
       }
     ]
   },

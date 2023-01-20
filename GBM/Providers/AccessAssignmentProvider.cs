@@ -1,9 +1,12 @@
-﻿using Microsoft.Extensions.Logging;
+﻿using GBM.Model;
+using GBM.Utility;
+using Microsoft.Extensions.Logging;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using Newtonsoft.Json.Serialization;
 using PartnerLed.Model;
 using PartnerLed.Utility;
+using System.Collections.Concurrent;
 using System.Net;
 
 namespace PartnerLed.Providers
@@ -16,6 +19,7 @@ namespace PartnerLed.Providers
         private readonly ITokenProvider tokenProvider;
         private readonly ILogger<AccessAssignmentProvider> logger;
         private readonly IExportImportProviderFactory exportImportProviderFactory;
+        private readonly CustomProperties customProperties;
 
         /// <summary>
         /// AccessAssignment provider constructor.
@@ -28,6 +32,7 @@ namespace PartnerLed.Providers
             protectedApiCallHelper = new ProtectedApiCallHelper(appSetting.Client);
             GraphBaseEndpoint = appSetting.MicrosoftGraphBaseEndpoint;
             GdapBaseEndpoint = appSetting.GdapBaseEndPoint;
+            customProperties = appSetting.customProperties;
         }
 
         protected ProtectedApiCallHelper protectedApiCallHelper;
@@ -56,6 +61,39 @@ namespace PartnerLed.Providers
         {
             var authenticationResult = await tokenProvider.GetTokenAsync(resource);
             return authenticationResult?.AccessToken;
+        }
+
+        /// <summary>
+        /// Create File for terminate list
+        /// </summary>
+        /// <param name="type"></param>
+        /// <returns></returns>
+        public async Task<bool> CreateDeleteAccessAssignmentFile(ExportImport type)
+        {
+            try
+            {
+                var fileName = "accessAssignment_delete";
+                var exportImportProvider = exportImportProviderFactory.Create(type);
+                var path = $"{Constants.InputFolderPath}/accessAssignment/{fileName.Trim().ToLower()}.{Helper.GetExtenstion(type)}";
+                //Create a dummy list;
+                var dummyList = new List<DelegatedAdminAccessAssignmentRequest>();
+                if (!File.Exists(path))
+                {
+                    await exportImportProvider.WriteAsync(dummyList, $"{Constants.InputFolderPath}/accessAssignment/{fileName}.{Helper.GetExtenstion(type)}");
+                }
+            }
+            catch (IOException ex)
+            {
+                logger.LogError(ex.Message);
+                Console.WriteLine("Make sure the file is closed before running the operation.");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine(ex.Message);
+            }
+
+            return true;
+
         }
 
         /// <summary>
@@ -103,7 +141,7 @@ namespace PartnerLed.Providers
                         Console.WriteLine($"{userResponse}");
                     }
                 } while (!string.IsNullOrEmpty(nextLink));
-                var writer = this.exportImportProviderFactory.Create(type);
+                var writer = exportImportProviderFactory.Create(type);
                 await writer.WriteAsync(securityGroup, $"{Constants.OutputFolderPath}/securityGroup.{Helper.GetExtenstion(type)}");
                 Console.WriteLine($"Downloaded Security Groups at {Constants.OutputFolderPath}/securityGroup.{Helper.GetExtenstion(type)}");
             }
@@ -122,55 +160,82 @@ namespace PartnerLed.Providers
         /// <returns>true </returns>
         public async Task<bool> RefreshAccessAssignmentRequest(ExportImport type)
         {
-            try
+            var fileNames = new[] { "accessAssignment", "accessAssignment_update", "accessAssignment_delete" };
+
+            var exportImportProvider = exportImportProviderFactory.Create(type);
+            var securityRolepath = $"{Constants.InputFolderPath}/securityGroup.{Helper.GetExtenstion(type)}";
+            var securityGroupList = await exportImportProvider.ReadAsync<SecurityGroup>(securityRolepath);
+            foreach (var fileName in fileNames)
             {
-                var exportImportProvider = exportImportProviderFactory.Create(type);
-                var accessAssignmentFilepath = $"{Constants.InputFolderPath}/accessAssignment/accessAssignment.{Helper.GetExtenstion(type)}";
-                var accessAssignmentList = await exportImportProvider.ReadAsync<DelegatedAdminAccessAssignmentRequest>(accessAssignmentFilepath);
-                Console.WriteLine($"Reading files @ {accessAssignmentFilepath}");
-                var inputRequest = accessAssignmentList?.Where(x => x.Status.ToLower() != "active");
-                var remainingDataList = accessAssignmentList?.Where(x => x.Status.ToLower() == "active");
-
-                if (inputRequest == null)
+                var accessAssignmentFilepath = $"{Constants.InputFolderPath}/accessAssignment/{fileName.Trim().ToLower()}.{Helper.GetExtenstion(type)}";
+                if (File.Exists(accessAssignmentFilepath))
                 {
-                    Console.WriteLine(" Error while Processing the input. Incorrect data provided for processing. Please check the input file.");
-                    Console.WriteLine($"Check the path {accessAssignmentFilepath}");
-                }
-
-                var responseList = new List<DelegatedAdminAccessAssignmentRequest>();
-                Console.WriteLine("Updating Access Assignment..");
-                protectedApiCallHelper.setHeader(false);
-
-                var options = new ParallelOptions()
-                {
-                    MaxDegreeOfParallelism = 10
-                };
-                if (inputRequest.Any())
-                {
-                    await Parallel.ForEachAsync(inputRequest, options, async (x, cancellationToken) =>
+                    try
                     {
-                        responseList.Add(await GetDelegatedAdminAccessAssignment(x.GdapRelationshipId, x.AccessAssignmentId));
-                    });
-                }
+                        var accessAssignmentList = await exportImportProvider.ReadAsync<DelegatedAdminAccessAssignmentRequest>(accessAssignmentFilepath);
+                        Console.WriteLine($"Reading files @ {accessAssignmentFilepath}");
+                        var statusToUpdate = GetStatus(fileName);
+                        var inputRequest = accessAssignmentList?.Where(x => x.Status.ToLower() == statusToUpdate).ToList();
+                        var remainingDataList = accessAssignmentList?.Where(x => x.Status.ToLower() != statusToUpdate).ToList();
 
-                if (remainingDataList != null)
-                {
-                    responseList.AddRange(remainingDataList);
-                }
+                        if (!inputRequest.Any())
+                        {
+                            Console.ForegroundColor = ConsoleColor.Yellow;
+                            Console.WriteLine($"No '{statusToUpdate}' access assignments found in the file {accessAssignmentFilepath}\n");
+                            Console.ResetColor();
+                            continue;
+                        }
 
-                Console.WriteLine("Downloading Access Assignment(s)...");
-                await exportImportProvider.WriteAsync(responseList, $"{Constants.InputFolderPath}/accessAssignment/accessAssignment.{Helper.GetExtenstion(type)}");
-                Console.WriteLine($"Downloaded Access Assignment(s) at {Constants.InputFolderPath}/accessAssignment/accessAssignment.{Helper.GetExtenstion(type)}");
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Error occurred while save the Access Assignment");
-                logger.LogError(ex.Message);
+                        var responseList = new ConcurrentBag<DelegatedAdminAccessAssignmentRequest>();
+                        Console.WriteLine("Refreshing status of access assignment(s)..");
+                        protectedApiCallHelper.setHeader(false);
+                        var options = new ParallelOptions()
+                        {
+                            MaxDegreeOfParallelism = 10
+                        };
+                        if (inputRequest.Any())
+                        {
+                            await Parallel.ForEachAsync(inputRequest, options, async (delegatedAdminAccessAssignmentRequest, cancellationToken) =>
+                            {
+                                responseList.Add(await GetDelegatedAdminAccessAssignment(delegatedAdminAccessAssignmentRequest, delegatedAdminAccessAssignmentRequest.AccessAssignmentId, securityGroupList));
+                            });
+                        }
+
+                        if (remainingDataList.Any())
+                        {
+                            foreach (var item in remainingDataList)
+                            {
+                                responseList.Add(item);
+                            }
+                        }
+                        Console.WriteLine("Downloading Access Assignment(s)...");
+                        await exportImportProvider.WriteAsync(responseList, $"{Constants.InputFolderPath}/accessAssignment/{fileName}.{Helper.GetExtenstion(type)}");
+                        Console.WriteLine($"Downloaded Access Assignment(s) at {Constants.InputFolderPath}/accessAssignment/{fileName}.{Helper.GetExtenstion(type)}\n");
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"Error occurred while save the Access Assignment");
+                        logger.LogError(ex.Message);
+                    }
+                }
+                else { continue; }
             }
 
             return true;
         }
 
+        private string GetStatus(string file)
+        {
+            switch (file)
+            {
+                case "accessAssignment":
+                case "accessAssignment_update":
+                    return "pending";
+                case "accessAssignment_delete":
+                    return "deleting";
+                default: return "active";
+            }
+        }
 
         /// <summary>
         /// Create bulk Delegated Admin relationship access assignment.
@@ -193,7 +258,7 @@ namespace PartnerLed.Providers
                 Console.WriteLine($"Reading files @ {securityRolepath}");
                 var securityGroupList = await exportImportProvider.ReadAsync<SecurityGroup>(securityRolepath);
 
-                if (securityGroupList == null)
+                if (!securityGroupList.Any())
                 {
                     throw new Exception($"No security groups found in gdapbulkmigration/securitygroup.{Helper.GetExtenstion(type)}");
                 }
@@ -220,16 +285,32 @@ namespace PartnerLed.Providers
                     protectedApiCallHelper.setHeader(false);
                     foreach (var gdapRelationship in inputList)
                     {
-                        var tasks = list?.Select(item => PostGranularAdminAccessAssignment(gdapRelationship.Id, item));
+                        var tasks = list?.Select(item => PostGranularAdminAccessAssignment(gdapRelationship, item, securityGroupList));
                         DelegatedAdminAccessAssignmentRequest?[] collection = await Task.WhenAll(tasks);
                         responseList.AddRange(collection);
                     }
 
-                    if (responseList != null)
+                    if (customProperties.ReplaceFileDuringUpdate && File.Exists($"{Constants.InputFolderPath}/accessAssignment/accessAssignment.{Helper.GetExtenstion(type)}"))
                     {
-                        await exportImportProvider.WriteAsync(responseList, $"{Constants.InputFolderPath}/accessAssignment/accessAssignment.{Helper.GetExtenstion(type)}");
-                        Console.WriteLine($"Downloaded Access Assignment(s) at {Constants.InputFolderPath}/accessAssignment/accessAssignment.{Helper.GetExtenstion(type)}");
+                        Filehelper.RenameFolder($"{Constants.InputFolderPath}/accessAssignment/accessAssignment.{Helper.GetExtenstion(type)}");
                     }
+
+                    //separating the failed 
+                    var failedStatus = new List<string> { "error", "failed" };
+                    var SucessfulAccessAssignment = responseList.Where(item => !failedStatus.Contains(item.Status.ToLower()) && !string.IsNullOrEmpty(item.Status));
+                    var failedAccessAssignment = responseList.Where(item => string.IsNullOrEmpty(item.Status) || failedStatus.Contains(item.Status.ToLower()));
+                    
+                    if (failedAccessAssignment.Any())
+                    {
+                        //Generating the failed file
+                        await exportImportProvider.WriteAsync(failedAccessAssignment, $"{Constants.InputFolderPath}/accessAssignment/accessAssignment_failed.{Helper.GetExtenstion(type)}");
+                    }
+                    
+                    await exportImportProvider.WriteAsync(SucessfulAccessAssignment, $"{Constants.InputFolderPath}/accessAssignment/accessAssignment.{Helper.GetExtenstion(type)}");
+                    // Generating a UPDATE FILE 
+                    await exportImportProvider.WriteAsync(SucessfulAccessAssignment, $"{Constants.InputFolderPath}/accessAssignment/accessAssignment_update.{Helper.GetExtenstion(type)}");
+                    Console.WriteLine($"Downloaded Access Assignment(s) at {Constants.InputFolderPath}/accessAssignment/accessAssignment.{Helper.GetExtenstion(type)}");
+
                 }
                 catch
                 {
@@ -249,17 +330,17 @@ namespace PartnerLed.Providers
         /// <summary>
         /// Create a Delegated Admin relationship access assignment.
         /// </summary>
-        /// <param name="gdapRelationshipId"></param>
-        /// <param name="token"></param>
+        /// <param name="gdapRelationship"></param>
         /// <param name="data"></param>
+        /// <param name="SecurityGroupList"></param>
         /// <returns>DelegatedAdminAccessAssignmentRequest</returns>
-        private async Task<DelegatedAdminAccessAssignmentRequest?> PostGranularAdminAccessAssignment(string gdapRelationshipId, DelegatedAdminAccessAssignment data)
+        private async Task<DelegatedAdminAccessAssignmentRequest?> PostGranularAdminAccessAssignment(DelegatedAdminRelationship gdapRelationship, DelegatedAdminAccessAssignment data, IEnumerable<SecurityGroup> SecurityGroupList)
         {
             try
             {
-                var url = $"{WebApiUrlAllGdaps}/{gdapRelationshipId}/accessAssignments";
+                var url = $"{WebApiUrlAllGdaps}/{gdapRelationship.Id}/accessAssignments";
 
-                logger.LogInformation($"Assignment Request:\n{gdapRelationshipId}\n{JsonConvert.SerializeObject(data.AccessDetails)}");
+                logger.LogInformation($"Assignment Request:\n{gdapRelationship.Id}\n{JsonConvert.SerializeObject(data.AccessDetails)}");
                 var token = await getToken(Resource.TrafficManager);
                 HttpResponseMessage response = await protectedApiCallHelper.CallWebApiPostAndProcessResultAsync(url, token, JsonConvert.SerializeObject(data,
                     new JsonSerializerSettings
@@ -269,40 +350,82 @@ namespace PartnerLed.Providers
                     }).ToString());
 
                 string userResponse = GetUserResponse(response.StatusCode);
-                Console.WriteLine($"{gdapRelationshipId}-{userResponse}");
+                Console.WriteLine($"{gdapRelationship.Id}-{userResponse}");
 
                 var accessAssignmentObject = response.IsSuccessStatusCode
                     ? JsonConvert.DeserializeObject<DelegatedAdminAccessAssignment>(response.Content.ReadAsStringAsync().Result)
                     : new DelegatedAdminAccessAssignment() { Status = "Failed", Id = string.Empty };
 
-                logger.LogInformation($"Assignment Response:\n {gdapRelationshipId}-{response.StatusCode} \n {response.Content.ReadAsStringAsync().Result} \n");
+                logger.LogInformation($"Assignment Response:\n {gdapRelationship.Id}-{response.StatusCode} \n {response.Content.ReadAsStringAsync().Result} \n");
 
                 return new DelegatedAdminAccessAssignmentRequest()
                 {
-                    GdapRelationshipId = gdapRelationshipId,
+                    GdapRelationshipId = gdapRelationship.Id,
+                    Customer = gdapRelationship.Customer,
                     AccessAssignmentId = accessAssignmentObject.Id,
-                    Status = accessAssignmentObject.Status
+                    SecurityGroupId = accessAssignmentObject.AccessContainer?.AccessContainerId,
+                    SecurityGroupName = GetGroupName(accessAssignmentObject.AccessContainer?.AccessContainerId, SecurityGroupList),
+                    CommaSeperatedRoles = accessAssignmentObject.AccessDetails != null ? 
+                    string.Join(",", accessAssignmentObject.AccessDetails?.UnifiedRoles.Select(item => item.RoleDefinitionId)) : string.Empty,
+                    Status = accessAssignmentObject.Status,
+                    Etag = accessAssignmentObject.ETag,
+                    CreatedDateTime = accessAssignmentObject.CreatedDateTime,
+                    LastModifiedDateTime = accessAssignmentObject.LastModifiedDateTime,
                 };
             }
             catch (Exception ex)
             {
                 logger.LogError(ex.Message);
             }
-            return new DelegatedAdminAccessAssignmentRequest();
+            return new DelegatedAdminAccessAssignmentRequest()
+            {
+                GdapRelationshipId = gdapRelationship.Id,
+                Customer = gdapRelationship.Customer,
+                SecurityGroupId = data.AccessContainer.AccessContainerId,
+                SecurityGroupName = GetGroupName(data.AccessContainer.AccessContainerId, SecurityGroupList),
+                CommaSeperatedRoles = string.Join(",", data.AccessDetails.UnifiedRoles.Select(item => item.RoleDefinitionId)),
+                Status = "Failed"
+            };
         }
 
-        private string GetUserResponse(HttpStatusCode statusCode)
+        private string GetUserResponse(HttpStatusCode statusCode, bool updatedStatus = false)
         {
             switch (statusCode)
             {
                 case HttpStatusCode.OK:
+                    return updatedStatus ? "No change" : "Created";
                 case HttpStatusCode.Created:
                     return "Created.";
-                case HttpStatusCode.Conflict: return "Access assignment already exits.";
+                case HttpStatusCode.Accepted:
+                    return "Updated";
+                case HttpStatusCode.NoContent:
+                    return "Deleted";
+                case HttpStatusCode.Conflict:
+                    return "Access assignment already exits.";
                 case HttpStatusCode.Forbidden: return "Please check if DAP relationship exists with the Customer.";
                 case HttpStatusCode.Unauthorized: return "Unauthorized. Please make sure your Sign-in credentials are correct and MFA enabled.";
-                case HttpStatusCode.BadRequest: return "Please check input setup for gdaprelationships and securitygroup configuration.";
+                case HttpStatusCode.BadRequest: return "Please check input setup for gdaprelationships and securitygroup configuration or Etag ";
                 default: return "Failed to create. Please try again.";
+            }
+
+        }
+
+        private string GetDeletionUserResponse(HttpStatusCode statusCode, bool updatedStatus = false)
+        {
+            switch (statusCode)
+            {
+                case HttpStatusCode.OK:
+                    return updatedStatus ? "No change" : "Deleted";
+                case HttpStatusCode.Accepted:
+                    return "Updated";
+                case HttpStatusCode.NoContent:
+                    return "Deleted";
+                case HttpStatusCode.Conflict:
+                    return "Access assignment already deleted.";
+                case HttpStatusCode.Forbidden: return "Forbidden.";
+                case HttpStatusCode.Unauthorized: return "Unauthorized. Please make sure your Sign-in credentials are correct and MFA enabled.";
+                case HttpStatusCode.BadRequest: return "Please check input setup for gdaprelationships and securitygroup configuration or Etag ";
+                default: return "Failed to delete. Please try again.";
             }
 
         }
@@ -310,48 +433,76 @@ namespace PartnerLed.Providers
         /// <summary>
         /// Gets the Delegated Admin relationship access assignment for a given Delegated Admin relationship ID.
         /// </summary>
-        /// <param name="gdapRelationshipId"></param>
+        /// <param name="delegatedAdminAccessAssignmentRequest"></param>
         /// <param name="accessAssignmentId"></param>
+        /// <param name="SecurityGroupList"></param>
         /// <returns>DelegatedAdminAccessAssignmentRequest</returns>
-        private async Task<DelegatedAdminAccessAssignmentRequest?> GetDelegatedAdminAccessAssignment(string gdapRelationshipId, string accessAssignmentId)
+        private async Task<DelegatedAdminAccessAssignmentRequest?> GetDelegatedAdminAccessAssignment(DelegatedAdminAccessAssignmentRequest delegatedAdminAccessAssignmentRequest, string accessAssignmentId, IEnumerable<SecurityGroup> SecurityGroupList)
         {
+            var gdapId = delegatedAdminAccessAssignmentRequest.GdapRelationshipId;
+            var CustomerDetails = delegatedAdminAccessAssignmentRequest.Customer;
             try
             {
-                var url = $"{WebApiUrlAllGdaps}/{gdapRelationshipId}/accessAssignments/{accessAssignmentId}";
+                var url = $"{WebApiUrlAllGdaps}/{gdapId}/accessAssignments/{accessAssignmentId}";
                 var token = await getToken(Resource.TrafficManager);
                 var response = await protectedApiCallHelper.CallWebApiAndProcessResultAsync(url, token);
                 if (response != null && response.IsSuccessStatusCode)
                 {
                     var accessAssignmentObject = JsonConvert.DeserializeObject<DelegatedAdminAccessAssignment>(response.Content.ReadAsStringAsync().Result);
 
-                    return new DelegatedAdminAccessAssignmentRequest()
+                    var delegatedAccessAssignmentReq = new DelegatedAdminAccessAssignmentRequest()
                     {
-                        GdapRelationshipId = gdapRelationshipId,
+                        GdapRelationshipId = gdapId,
+                        Customer = CustomerDetails,
                         AccessAssignmentId = accessAssignmentId,
-                        Status = accessAssignmentObject.Status
+                        SecurityGroupId = accessAssignmentObject.AccessContainer.AccessContainerId,
+                        SecurityGroupName = GetGroupName(accessAssignmentObject.AccessContainer.AccessContainerId, SecurityGroupList),
+                        CommaSeperatedRoles = string.Join(",", accessAssignmentObject.AccessDetails.UnifiedRoles.Select(item => item.RoleDefinitionId)),
+                        Status = accessAssignmentObject.Status,
+                        Etag = accessAssignmentObject.ETag,
+                        CreatedDateTime = accessAssignmentObject.CreatedDateTime,
+                        LastModifiedDateTime = accessAssignmentObject.LastModifiedDateTime,
                     };
+                    return delegatedAccessAssignmentReq;
                 }
-                else
+
+                return new DelegatedAdminAccessAssignmentRequest()
                 {
-                    return new DelegatedAdminAccessAssignmentRequest()
-                    {
-                        GdapRelationshipId = gdapRelationshipId,
-                        AccessAssignmentId = accessAssignmentId,
-                        Status = "Failed"
-                    };
-                }
+                    GdapRelationshipId = gdapId,
+                    AccessAssignmentId = accessAssignmentId,
+                    Customer = CustomerDetails,
+                    Status = "Failed"
+                };
+
             }
             catch (Exception ex)
             {
                 logger.LogError(ex.Message);
-                Console.WriteLine($"{gdapRelationshipId} - Unexpected error.");
+                Console.WriteLine($"{gdapId} - Unexpected error.");
                 return new DelegatedAdminAccessAssignmentRequest()
                 {
-                    GdapRelationshipId = gdapRelationshipId,
+                    GdapRelationshipId = gdapId,
                     AccessAssignmentId = accessAssignmentId,
-                    Status = "Errored"
+                    Customer = CustomerDetails,
+                    Status = "Error"
                 };
             }
+        }
+
+        /// <summary>
+        /// Get Security Group Name
+        /// </summary>
+        /// <param name="securityGroupId"></param>
+        /// <param name="SecurityGroupList"></param>
+        /// <returns></returns>
+        private string GetGroupName(string securityGroupId, IEnumerable<SecurityGroup> SecurityGroupList)
+        {
+            if (string.IsNullOrEmpty(securityGroupId))
+            {
+                return string.Empty;
+            }
+            var sgObject = SecurityGroupList.Where(SG => SG.Id == securityGroupId.Trim()).FirstOrDefault();
+            return sgObject != null ? sgObject.DisplayName.ToString() : string.Empty;
         }
 
         /// <summary>
@@ -360,11 +511,14 @@ namespace PartnerLed.Providers
         /// <param name="SecurityGrpId"></param>
         /// <param name="roleList"></param>
         /// <returns>DelegatedAdminAccessAssignment</returns>
-        private DelegatedAdminAccessAssignment GetAdminAccessAssignmentObject(string SecurityGrpId, IEnumerable<UnifiedRole> roleList, List<ADRole> ADRolesList)
+        private DelegatedAdminAccessAssignment GetAdminAccessAssignmentObject(string SecurityGrpId, IEnumerable<UnifiedRole> roleList, List<ADRole> ADRolesList, string? accessAssignmentId = null)
         {
-            // TODO: validating the role using create of GDAP relation are the same using 
             var validatedRoles = ValidateRole(roleList, ADRolesList);
-            return new DelegatedAdminAccessAssignment() { AccessContainer = new DelegatedAdminAccessContainer() { AccessContainerId = SecurityGrpId, AccessContainerType = DelegatedAdminAccessContainerType.SecurityGroup }, AccessDetails = new DelegatedAdminAccessDetails() { UnifiedRoles = validatedRoles } };
+            if (string.IsNullOrEmpty(accessAssignmentId))
+            {
+                return new DelegatedAdminAccessAssignment() { AccessContainer = new DelegatedAdminAccessContainer() { AccessContainerId = SecurityGrpId, AccessContainerType = DelegatedAdminAccessContainerType.SecurityGroup }, AccessDetails = new DelegatedAdminAccessDetails() { UnifiedRoles = validatedRoles } };
+            }
+            return new DelegatedAdminAccessAssignment() { Id = accessAssignmentId, AccessContainer = new DelegatedAdminAccessContainer() { AccessContainerId = SecurityGrpId, AccessContainerType = DelegatedAdminAccessContainerType.SecurityGroup }, AccessDetails = new DelegatedAdminAccessDetails() { UnifiedRoles = validatedRoles } };
         }
 
         /// <summary>
@@ -387,6 +541,234 @@ namespace PartnerLed.Providers
             }
 
             return validateRoles;
+        }
+
+        /// <summary>
+        /// Update bulk Delegated Admin relationship access assignment.
+        /// </summary>
+        /// <returns>true </returns>
+        public async Task<bool> UpdateAccessAssignmentRequestAsync(ExportImport type)
+        {
+            try
+            {
+                var exportImportProvider = exportImportProviderFactory.Create(type);
+                var azureRoleFilePath = $"{Constants.InputFolderPath}/ADRoles.{Helper.GetExtenstion(type)}";
+                Console.WriteLine($"Reading file @ {azureRoleFilePath}");
+                var inputAdRole = await exportImportProvider.ReadAsync<ADRole>(azureRoleFilePath);
+
+                var securityRolepath = $"{Constants.InputFolderPath}/securityGroup.{Helper.GetExtenstion(type)}";
+                Console.WriteLine($"Reading file @ {securityRolepath}");
+                var accessAssignmentFilepath = $"{Constants.InputFolderPath}/accessAssignment/accessAssignment_update.{Helper.GetExtenstion(type)}";
+                var accessAssignmentList = await exportImportProvider.ReadAsync<DelegatedAdminAccessAssignmentRequest>(accessAssignmentFilepath);
+                Console.WriteLine($"Reading file @ {accessAssignmentFilepath}");
+                var inputRequest = accessAssignmentList?.Where(x => x.Status.ToLower() == "active").ToList();
+                var remainingDataList = accessAssignmentList?.Where(x => x.Status.ToLower() != "active").ToList();
+                var securityGroupList = await exportImportProvider.ReadAsync<SecurityGroup>(securityRolepath);
+
+                if (!inputRequest.Any())
+                {
+                    throw new Exception("Error while processing the input. Incorrect data provided for processing. Please check the input file.");
+                }
+
+
+                if (inputRequest.Any(item => string.IsNullOrEmpty(item.CommaSeperatedRoles)))
+                {
+                    throw new Exception($"One or more security groups do not have roles mapped in GDAPBulkMigration/operations/accessAssignment_update.{Helper.GetExtenstion(type)}");
+                }
+
+                var option = Helper.UserConfirmation($"Waring: There are {inputRequest.Count()} access assignment for update, are you sure you want to continue?");
+                if (!option)
+                {
+                    return true;
+                }
+                var list = new List<DelegatedAdminAccessAssignment>();
+                // get the unique AD roles 
+                list.AddRange(from DelegatedAdminAccessAssignmentRequest? item in inputRequest select GetAdminAccessAssignmentObject(item.SecurityGroupId, item.Roles, inputAdRole, item.AccessAssignmentId));
+                var responseList = new List<DelegatedAdminAccessAssignmentRequest>();
+                Console.WriteLine("Updating Access Assignment..");
+                foreach (var accessAssignment in accessAssignmentList)
+                {
+                    protectedApiCallHelper.setHeader(false);
+                    var tasks = list?.Where(item => item.Id == accessAssignment.AccessAssignmentId)
+                                     .Select(item => UpdateDelegatedAdminAccessAssignment(accessAssignment, item, securityGroupList));
+                    DelegatedAdminAccessAssignmentRequest?[] collection = await Task.WhenAll(tasks);
+                    responseList.AddRange(collection);
+                }
+
+                if (remainingDataList.Any())
+                {
+                    responseList.AddRange(remainingDataList);
+                }
+
+                await exportImportProvider.WriteAsync(responseList, $"{Constants.InputFolderPath}/accessAssignment/accessAssignment_update.{Helper.GetExtenstion(type)}");
+                Console.WriteLine($"Downloaded Access Assignment(s) at {Constants.InputFolderPath}/accessAssignment/accessAssignment-update.{Helper.GetExtenstion(type)}");
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex.Message);
+            }
+            return true;
+        }
+
+        /// <summary>
+        /// Update the Delegated Admin relationship access assignment for a given Delegated Admin relationship ID.
+        /// </summary>
+        /// <param name="OldDelegatedAdminAccessAssignmentRequest"></param>
+        /// <param name="newData"></param>
+        /// <param name="SecurityGroupList"></param>
+        /// <returns>DelegatedAdminAccessAssignmentRequest</returns>
+        private async Task<DelegatedAdminAccessAssignmentRequest> UpdateDelegatedAdminAccessAssignment(DelegatedAdminAccessAssignmentRequest OldDelegatedAdminAccessAssignmentRequest, DelegatedAdminAccessAssignment newData, IEnumerable<SecurityGroup> SecurityGroupList)
+        {
+            try
+            {
+                //Merging Data
+                newData.LastModifiedDateTime = OldDelegatedAdminAccessAssignmentRequest.LastModifiedDateTime;
+                newData.CreatedDateTime = OldDelegatedAdminAccessAssignmentRequest.CreatedDateTime;
+                newData.Id = OldDelegatedAdminAccessAssignmentRequest.AccessAssignmentId;
+
+                var eTag = OldDelegatedAdminAccessAssignmentRequest.Etag;
+                var gdapRelationshipId = OldDelegatedAdminAccessAssignmentRequest.GdapRelationshipId;
+
+                var url = $"{WebApiUrlAllGdaps}/{gdapRelationshipId}/accessAssignments/{OldDelegatedAdminAccessAssignmentRequest.AccessAssignmentId}";
+
+                logger.LogInformation($"Assignment Request:\n{gdapRelationshipId}\n{JsonConvert.SerializeObject(newData.AccessDetails)}");
+                var token = await getToken(Resource.TrafficManager);
+                HttpResponseMessage response = await protectedApiCallHelper.CallWebApiPatchAndProcessResultAsync(url, token, eTag, JsonConvert.SerializeObject(newData,
+                    new JsonSerializerSettings
+                    {
+                        NullValueHandling = NullValueHandling.Ignore,
+                        ContractResolver = new CamelCasePropertyNamesContractResolver()
+                    }).ToString());
+
+                string userResponse = GetUserResponse(response.StatusCode, true);
+                Console.WriteLine($"{gdapRelationshipId}-{userResponse}");
+
+                logger.LogInformation($"Assignment Response:\n {gdapRelationshipId}-{response.StatusCode} \n {response.Content.ReadAsStringAsync().Result} \n");
+
+                var reqObj = new DelegatedAdminAccessAssignmentRequest()
+                {
+                    GdapRelationshipId = gdapRelationshipId,
+                    Customer = OldDelegatedAdminAccessAssignmentRequest.Customer,
+                    AccessAssignmentId = newData.Id,
+                    SecurityGroupId = newData.AccessContainer.AccessContainerId,
+                    CreatedDateTime = newData.CreatedDateTime,
+                    SecurityGroupName = GetGroupName(newData.AccessContainer.AccessContainerId, SecurityGroupList),
+                    CommaSeperatedRoles = string.Join(",", newData.AccessDetails.UnifiedRoles.Select(item => item.RoleDefinitionId)),
+                    LastModifiedDateTime = newData.LastModifiedDateTime
+                };
+
+                if (response.IsSuccessStatusCode && response.StatusCode == HttpStatusCode.OK || response.StatusCode == HttpStatusCode.Accepted)
+                {
+                    reqObj.Status = response.StatusCode == HttpStatusCode.Accepted ? "pending" : response.StatusCode == HttpStatusCode.OK ? "active" : "Failed";
+                    reqObj.Etag = response.StatusCode == HttpStatusCode.Accepted ? string.Empty : eTag;
+                    return reqObj;
+                }
+                reqObj.Status = "Failed";
+                return reqObj;
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex.Message);
+                return new DelegatedAdminAccessAssignmentRequest()
+                {
+                    GdapRelationshipId = OldDelegatedAdminAccessAssignmentRequest.GdapRelationshipId,
+                    AccessAssignmentId = OldDelegatedAdminAccessAssignmentRequest.AccessAssignmentId,
+                    Customer = OldDelegatedAdminAccessAssignmentRequest.Customer,
+                    Status = "Error"
+                };
+            }
+        }
+
+        /// <summary>
+        /// Delete the Delegated Admin relationship access assignment for a given Delegated Admin relationship ID.
+        /// </summary>
+        /// <param name="delegatedAdminAccessAssignmentRequest"></param>
+        /// <returns>DelegatedAdminAccessAssignmentRequest</returns>
+        private async Task<DelegatedAdminAccessAssignmentRequest?> DeleteDelegatedAdminAccessAssignment(DelegatedAdminAccessAssignmentRequest delegatedAdminAccessAssignmentRequest)
+        {
+            var gdapRelationshipId = delegatedAdminAccessAssignmentRequest.GdapRelationshipId;
+            var accessAssignmentId = delegatedAdminAccessAssignmentRequest.AccessAssignmentId;
+            var eTag = delegatedAdminAccessAssignmentRequest.Etag;
+            try
+            {
+                var url = $"{WebApiUrlAllGdaps}/{gdapRelationshipId}/accessAssignments/{accessAssignmentId}";
+                var token = await getToken(Resource.TrafficManager);
+                var response = await protectedApiCallHelper.CallWebApiAndDeleteProcessResultAsync(url, token, eTag);
+
+                string userResponse = GetDeletionUserResponse(response.StatusCode);
+                Console.WriteLine($"{accessAssignmentId}-{userResponse}");
+
+                var responseObj = delegatedAdminAccessAssignmentRequest;
+                if (response != null && response.IsSuccessStatusCode)
+                {
+                    responseObj.Status = "Deleting";
+                    return responseObj;
+                }
+                responseObj.Status = "Failed";
+                return responseObj;
+
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex.Message);
+                delegatedAdminAccessAssignmentRequest.Status = "Errored";
+                return delegatedAdminAccessAssignmentRequest;
+            }
+        }
+
+        /// <summary>
+        /// Delete bulk Delegated Admin relationship access assignment.
+        /// </summary>
+        /// <returns>true </returns>
+        public async Task<bool> DeleteAccessAssignmentRequestAsync(ExportImport type)
+        {
+            try
+            {
+                var exportImportProvider = exportImportProviderFactory.Create(type);
+                var accessAssignmentFilepath = $"{Constants.InputFolderPath}/accessAssignment/accessAssignment_delete.{Helper.GetExtenstion(type)}";
+                var accessAssignmentList = await exportImportProvider.ReadAsync<DelegatedAdminAccessAssignmentRequest>(accessAssignmentFilepath);
+                Console.WriteLine($"Reading file @ {accessAssignmentFilepath}");
+                var inputRequest = accessAssignmentList?.Where(x => x.Status.ToLower() == "active").ToList();
+                var remainingDataList = accessAssignmentList?.Where(x => x.Status.ToLower() != "active").ToList();
+
+                if (!inputRequest.Any())
+                {
+                    throw new Exception("Error while Processing the input. Incorrect newData provided for processing. Please check the input file.");
+                }
+                var option = Helper.UserConfirmation($"Waring: There are {inputRequest?.Count()} access assignment(s) that will terminated, are you sure you want to continue?");
+                if (!option)
+                {
+                    return true;
+                }
+                var responseList = new ConcurrentBag<DelegatedAdminAccessAssignmentRequest>();
+                Console.WriteLine("Deleting access assignment..");
+                protectedApiCallHelper.setHeader(false);
+                               
+                if (inputRequest.Any())
+                {
+                    inputRequest.ForEach((delegatedAdminAccessAssignment) =>
+                    {
+                        responseList.Add(DeleteDelegatedAdminAccessAssignment(delegatedAdminAccessAssignment).Result);
+                    });
+                }
+
+                if (remainingDataList.Any())
+                {
+                    foreach (var item in remainingDataList)
+                    {
+                        responseList.Add(item);
+                    }
+                }
+
+                await exportImportProvider.WriteAsync(responseList, $"{Constants.InputFolderPath}/accessAssignment/accessAssignment_delete.{Helper.GetExtenstion(type)}");
+                Console.WriteLine($"Deleted access assignment(s) at {Constants.InputFolderPath}/accessAssignment/accessAssignment_delete.{Helper.GetExtenstion(type)}");
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex.Message);
+            }
+
+            return true;
         }
     }
 }
