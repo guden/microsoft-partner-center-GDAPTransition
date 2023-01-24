@@ -26,6 +26,7 @@ using IHost host = Host.CreateDefaultBuilder(args)
         services.AddSingleton<IAzureRoleProvider, AzureRoleProvider>();
         services.AddSingleton<IGdapProvider, GdapProvider>();
         services.AddSingleton<IAccessAssignmentProvider, AccessAssignmentProvider>();
+        services.AddSingleton<ICustomerProvider, CustomerProvider>();
     }).ConfigureLogging(logging =>
     {
         logging.ClearProviders().AddCustomLogger();
@@ -57,7 +58,7 @@ static async Task RunAsync(IServiceProvider serviceProvider, string version)
 SelectOption:
     Console.Write('>');
     var option = Console.ReadLine();
-    if (!short.TryParse(option, out short input) || !(input >= 1 && input <= 13))
+    if (!short.TryParse(option, out short input) || !(input >= 1 && input <= 14))
     {
         Console.WriteLine("Invalid input, Please try again.");
         DisplayOptions();
@@ -82,6 +83,7 @@ SelectOption:
         10 => await serviceProvider.GetRequiredService<IAccessAssignmentProvider>().RefreshAccessAssignmentRequest(type),
         11 => await serviceProvider.GetRequiredService<IAccessAssignmentProvider>().UpdateAccessAssignmentRequestAsync(type),
         12 => await serviceProvider.GetRequiredService<IAccessAssignmentProvider>().DeleteAccessAssignmentRequestAsync(type),
+        14 => await serviceProvider.GetRequiredService<ICustomerProvider>().DAPTermination(type),
         _ => throw new InvalidOperationException("Invalid input")
     };
 
@@ -110,13 +112,15 @@ static void DisplayOptions()
     Console.WriteLine("Update and delete operations: ");
     Console.WriteLine("\t 11. Update Security Group-Role Assignment(s)");
     Console.WriteLine("\t 12. Delete Security Group-Role Assignment(s)");
-    Console.WriteLine("\t 13. Terminate GDAP Relationship(s)\n");
+    Console.WriteLine("\t 13. Terminate GDAP Relationship(s)");
+    Console.WriteLine("\t 14. DAP Termination(s)\n");
 }
 
 static async void SetupFile(ExportImport type, IServiceProvider serviceProvider)
 {
     await serviceProvider.GetRequiredService<IGdapProvider>().CreateTerminateRelationshipFile(type);
     await serviceProvider.GetRequiredService<IAccessAssignmentProvider>().CreateDeleteAccessAssignmentFile(type);
+    await serviceProvider.GetRequiredService<ICustomerProvider>().CreateDAPTerminateFile(type);
 }
 
 static bool checkPrerequisites(IServiceProvider serviceProvider)
