@@ -133,7 +133,7 @@ namespace PartnerLed.Providers
                     return true;
                 }
 
-                var option = Helper.UserConfirmation($"Warning: This is permanent change, are you sure you want to continue with {inputCustomer.Count()} dap removal?");
+                var option = Helper.UserConfirmation($"Warning: This is permanent change, are you sure you want to continue with {inputCustomer.Count()} record(s) for DAP removal?");
                 if (!option)
                 {
                     return true;
