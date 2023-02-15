@@ -6,5 +6,8 @@ namespace PartnerLed.Model
     {
         [JsonProperty("allowDelegatedAccess")]
         public bool AllowDelegatedAccess { get; set; }
+
+        [JsonProperty("attribute")]
+        public Attribute attributes { get; set; }
     }
 }
