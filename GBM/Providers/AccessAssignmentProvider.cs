@@ -175,13 +175,13 @@ namespace PartnerLed.Providers
                         var accessAssignmentList = await exportImportProvider.ReadAsync<DelegatedAdminAccessAssignmentRequest>(accessAssignmentFilepath);
                         Console.WriteLine($"Reading files @ {accessAssignmentFilepath}");
                         var statusToUpdate = GetStatus(fileName);
-                        var inputRequest = accessAssignmentList?.Where(x => x.Status.ToLower() == statusToUpdate).ToList();
-                        var remainingDataList = accessAssignmentList?.Where(x => x.Status.ToLower() != statusToUpdate).ToList();
+                        var inputRequest = accessAssignmentList?.Where(x => statusToUpdate.Contains(x.Status?.ToLower())).ToList();
+                        var remainingDataList = accessAssignmentList?.Where(x => !statusToUpdate.Contains(x.Status?.ToLower())).ToList();
 
                         if (!inputRequest.Any())
                         {
                             Console.ForegroundColor = ConsoleColor.Yellow;
-                            Console.WriteLine($"No '{statusToUpdate}' access assignments found in the file {accessAssignmentFilepath}\n");
+                            Console.WriteLine($"No '{statusToUpdate[0]}' access assignments found in the file {accessAssignmentFilepath}\n");
                             Console.ResetColor();
                             continue;
                         }
@@ -224,16 +224,17 @@ namespace PartnerLed.Providers
             return true;
         }
 
-        private string GetStatus(string file)
+        private List<string> GetStatus(string file)
         {
             switch (file)
             {
                 case "accessAssignment":
+                    return new List<string>(){"pending"};
                 case "accessAssignment_update":
-                    return "pending";
+                    return new List<string>(){"pending","active"};
                 case "accessAssignment_delete":
-                    return "deleting";
-                default: return "active";
+                    return new List<string>(){"deleting"};
+                default: return new List<string>(){"active"};
             }
         }
 
