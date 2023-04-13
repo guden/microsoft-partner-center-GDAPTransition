@@ -229,7 +229,7 @@ namespace PartnerLed.Providers
             switch (file)
             {
                 case "accessAssignment":
-                    return new List<string>(){"pending"};
+                    return new List<string>(){"pending","active"};
                 case "accessAssignment_update":
                     return new List<string>(){"pending","active"};
                 case "accessAssignment_delete":
