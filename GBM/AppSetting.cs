@@ -2,6 +2,7 @@
 
 using GBM.Model;
 using Microsoft.Identity.Client;
+using System.Net;
 
 namespace PartnerLed
 {
@@ -19,7 +20,14 @@ namespace PartnerLed
 
         public CustomProperties customProperties { get; private set; }
 
-        public HttpClient Client { get { return new HttpClient(); } }
+        
+
+        private HttpClientHandler httpHandler = new HttpClientHandler()
+        {
+            AutomaticDecompression = DecompressionMethods.All
+        };
+
+        public HttpClient Client { get { return new HttpClient(httpHandler); } }
 
         private void init()
         {
